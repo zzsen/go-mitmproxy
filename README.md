@@ -57,6 +57,6 @@ type ProxyStrategy struct {
 | originInfo2Query | bool     | false  | 原请求信息拼接到 query 内, 格式: `fmt.Sprintf("method=%s&scheme=%s&host=%s&path=%s&query=%s",【原 Method】, 【原 Scheme】, 【原 Host】, 【原 Path】, 【原 RawQuery】)` |
 
 ### 更多
-fork from [lqqyt2423/go-mitmproxy](https://github.com/lqqyt2423/go-mitmproxy)
-原readme: [README.md](https://github.com/lqqyt2423/go-mitmproxy/blob/main/README.md)
+fork from [lqqyt2423/go-mitmproxy](https://github.com/lqqyt2423/go-mitmproxy)<br/>
+原readme: [README.md](https://github.com/lqqyt2423/go-mitmproxy/blob/main/README.md)<br/>
 原readme(英文版): [README_EN.md](https://github.com/lqqyt2423/go-mitmproxy/blob/main/README_EN.md)
