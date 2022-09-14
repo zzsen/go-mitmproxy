@@ -1,0 +1,23 @@
+[{
+    "type": "request",
+    "regex":"panku*",    
+    "host":"localhost:8080",
+    "path":"test",
+    "method":"get",
+    "scheme":"http",
+    "originInfo2Query": true   
+},{
+    "type": "response",
+    "regex":"image/*",    
+    "host":"localhost:8080",
+    "path":"test",
+    "method":"get",
+    "scheme":"http"   
+},{
+    "type": "response",
+    "regex":"html/*",    
+    "host":"localhost:8080",
+    "path":"test",
+    "method":"get",
+    "scheme":"http"   
+}]

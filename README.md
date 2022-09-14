@@ -1,84 +1,62 @@
-# go-mitmproxy
+### 实现功能
+1. 在`request`阶段前, 根据路由正则`regex`进行请求转发
+2. 在`response`阶段, 根据`contentType`对response的body进行改写
+	> 头部的contentType满足配置中的`regex`或头部的contentType和配置中的`contentType`一致
 
-[English](./README_EN.md)
 
-Golang 版本的 [mitmproxy](https://mitmproxy.org/)。
-
-用 Golang 实现的中间人攻击（[Man-in-the-middle](https://en.wikipedia.org/wiki/Man-in-the-middle_attack)），解析、监测、篡改 HTTP/HTTPS 流量。
-
-## 特点
-
-- HTTPS 证书相关逻辑参考 [mitmproxy](https://mitmproxy.org/) 且与之兼容，根证书也保存在 `~/.mitmproxy` 文件夹中，如果之前用过 `mitmproxy` 且根证书已经安装信任，则此 `go-mitmproxy` 可以直接使用
-- 支持插件机制，很方便扩展自己需要的功能，可参考 [examples](./examples)
-- 性能优势
-  - Golang 天生的性能优势
-  - 在进程内存中转发解析 HTTPS 流量，不需通过 tcp 端口 或 unix socket 等进程间通信
-  - 生成不同域名证书时使用 LRU 缓存，避免重复计算
-- 通过环境变量 `SSLKEYLOGFILE` 支持 `Wireshark` 解析分析流量
-- 上传/下载大文件时支持流式传输
-- Web 界面
-
-## 安装
-
-```
-go install github.com/lqqyt2423/go-mitmproxy/cmd/go-mitmproxy@latest
-```
-
-## 命令行使用
-
-### 启动
-
-```
-go-mitmproxy
-```
-
-启动后，HTTP 代理地址默认为 9080 端口，Web 界面默认在 9081 端口。
-
-首次启动后需按照证书以解析 HTTPS 流量，证书会在首次启动命令后自动生成，路径为 `~/.mitmproxy/mitmproxy-ca-cert.pem`。可参考此链接安装：[About Certificates](https://docs.mitmproxy.org/stable/concepts-certificates/)。
+### 相关脚本
+1. 直接启动 `go run main.go`
+2. 打包成exe后启动 `go build`
+	> 如需制定打包路径和生成的exe名称, 则加上`[-o 文件名]`, 默认是当前路径下的`go-mitmproxy.exe`
 
 ### 启动参数
+| 参数                  | 说明                                                   | 默认值       | 依赖  |
+| --------------------- | ------------------------------------------------------ | ------------ | ----- |
+| --debug               | 日志输出级别, ≤0时为InfoLevel, >0时为DebugLevel         | 0          | -     |
+| --version             | 输出go-mitmproxy的版本                                 | false      | -     |
+| --addr                | 监听地址和端口                                         | :9998        | -     |
+| --web_addr            | 可视化网页地址                                         | :9999        | -     |
+| --proxy_config_path   | 代理转发策略配置路径                                   | ./proxy.json | -     |
+| --cert_path           | 证书地址                                               | .mitmproxy   | -     |
+| --stream_large_bodies | (规划中, 暂未支持)当请求或响应体大于此字节时，转为 stream 模式, 默认 5mb | 5,242,880    | -     |
+| --log                 | (规划中, 暂未支持)是否启动日志                         | false        | -     |
+| --logPath             | (规划中, 暂未支持)日志路径, 需先启动 log               | ./log        | --log |
 
+### 证书安装
+
+服务启动后, 会在`cert_path`参数指定的路径下生成证书, 双击证书`mitmproxy-ca-cert.cer`进行安装, 安装在`受信任的根证书颁发机构`
+
+> 安装后, windows下可以在 cmd 窗口中输入`certmgr`, 打开证书管理, 查看`受信任的根证书颁发机构`下, 是否存在`颁发者`和`颁发给`都是`mitmproxy`的证书
+
+### 代理转发策略配置
+
+代理转发策略配置路径由启动参数中的`--config_path`决定, 默认是当前路径下的`proxy.json`, 配置以 json 的格式存放的`ProxyStrategy`数组, 数组的数据结构如下:
+
+```go
+type ProxyStrategy struct {
+	Type             string `json:"type"`
+	ContentType      string `json:"contentType"`
+	Regex            string `json:"regex"`
+	Host             string `json:"host"`
+	Path             string `json:"path"`
+	Method           string `json:"method"`
+	Scheme           string `json:"scheme"`
+	OriginInfo2Query bool   `json:"originInfo2Query"`
+}
 ```
-Usage of go-mitmproxy:
-  -addr string
-    	proxy listen addr (default ":9080")
-  -cert_path string
-    	path of generate cert files
-  -debug int
-    	debug mode: 1 - print debug log, 2 - show debug from
-  -dump string
-    	dump filename
-  -dump_level int
-    	dump level: 0 - header, 1 - header + body
-  -mapper_dir string
-    	mapper files dirpath
-  -ssl_insecure
-    	not verify upstream server SSL/TLS certificates.
-  -version
-    	show version
-  -web_addr string
-    	web interface listen addr (default ":9081")
-```
 
-## 作为包引入
+| 参数             | 数据类型 | 默认值 | 说明                                                                                                                                                                   |
+| ---------------- | -------- | ------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| type             | string   | -      | 转发协议作用域, 可选: "request", "response" |
+| contentType      | string   | -      | 转发内容类型, 根据response的header的content-type进行转发 (和regex二选一为必填) |
+| regex            | string   | -      | 转发地址正则  (和contentType二选一为必填) |
+| host             | string   | -      | 转发地址 host, 为空则直接请求原目标地址 |
+| scheme           | string   | -      | 转发协议, 为空则使用原请求协议 |
+| path             | string   | -      | 转发地址路径, 为空则使用原请求路径 |
+| method           | string   | -      | 请求方式, 为空则使用原请求方式 |
+| originInfo2Query | bool     | false  | 原请求信息拼接到 query 内, 格式: `fmt.Sprintf("method=%s&scheme=%s&host=%s&path=%s&query=%s",【原 Method】, 【原 Scheme】, 【原 Host】, 【原 Path】, 【原 RawQuery】)` |
 
-参考 [cmd/go-mitmproxy/main.go](./cmd/go-mitmproxy/main.go)，可通过自己实现 `AddAddon` 方法添加自己实现的插件。
-
-更多示例可参考 [examples](./examples)
-
-## Web 界面
-
-![](./assets/web-1.png)
-
-![](./assets/web-2.png)
-
-![](./assets/web-3.png)
-
-## TODO
-
-- [ ] 支持 http2 协议
-- [ ] 支持解析 websocket
-
-## License
-
-[MIT License](./LICENSE)
+### 更多
+fork from [lqqyt2423/go-mitmproxy](https://github.com/lqqyt2423/go-mitmproxy)
+原readme: [README.md](https://github.com/lqqyt2423/go-mitmproxy/blob/main/README.md)
+原readme(英文版): [README_EN.md](https://github.com/lqqyt2423/go-mitmproxy/blob/main/README_EN.md)
