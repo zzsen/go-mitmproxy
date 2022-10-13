@@ -5,8 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"io/ioutil"
-	rawLog "log"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -20,7 +19,6 @@ import (
 )
 
 type Config struct {
-	debug           int
 	version         bool
 	certPath        string
 	proxyConfigPath string
@@ -28,16 +26,18 @@ type Config struct {
 	addr         string
 	webAddr      string
 	ssl_insecure bool
+
+	logPath string
 }
 
 func (config *Config) loadConfig() {
-	flag.IntVar(&config.debug, "debug", 0, "debug mode: 1 - print debug log, 2 - show debug from")
 	flag.BoolVar(&config.version, "version", false, "show version")
 	flag.StringVar(&config.addr, "addr", ":9998", "proxy listen addr")
 	flag.StringVar(&config.webAddr, "web_addr", ":9999", "web interface listen addr")
 	flag.BoolVar(&config.ssl_insecure, "ssl_insecure", false, "not verify upstream server SSL/TLS certificates.")
 	flag.StringVar(&config.certPath, "cert_path", ".mitmproxy", "path of generate cert files")
 	flag.StringVar(&config.proxyConfigPath, "proxy_config_path", "./proxy.json", "path of proxy config files")
+	flag.StringVar(&config.logPath, "log_path", "./log/mitmproxy.log", "path of log")
 	flag.Parse()
 }
 
@@ -45,7 +45,7 @@ var config Config
 
 func (a *SetProxyStrategy) loadProxyConfig() {
 	a.ProxyStrategys = []ProxyStrategy{}
-	log.Infof("load proxy config from path: %s", config.proxyConfigPath)
+	Infof("load proxy config from path: %s", config.proxyConfigPath)
 	if config.proxyConfigPath == "" {
 		return
 	}
@@ -53,21 +53,22 @@ func (a *SetProxyStrategy) loadProxyConfig() {
 	jsonFile, err := os.Open(config.proxyConfigPath)
 
 	if err != nil {
-		log.Error("error occurs while opening proxy config file")
+		Error("error occurs while opening proxy config file")
 		return
 	}
 	defer jsonFile.Close()
 
-	jsonData, err := ioutil.ReadAll(jsonFile)
+	jsonData, err := io.ReadAll(jsonFile)
 	if err != nil {
-		log.Error("error occurs while reading proxy config file")
+		Error("error occurs while reading proxy config file")
 		return
 	}
 
 	if err := json.Unmarshal(jsonData, &a.ProxyStrategys); err == nil {
-		log.Info(a.ProxyStrategys)
+		proxyContent, _ := json.Marshal(a.ProxyStrategys)
+		Info("proxy content: ", string(proxyContent))
 	} else {
-		log.Error("error occurs while parsing proxy config file")
+		Error("error occurs while parsing proxy config file")
 		return
 	}
 }
@@ -88,6 +89,68 @@ type SetProxyStrategy struct {
 	ProxyStrategys []ProxyStrategy // 代理策略
 }
 
+var fileLog *log.Logger
+var consoleLog *log.Logger
+
+func Info(args ...interface{}) {
+	fileLog.Info(args...)
+	consoleLog.Info(args...)
+}
+func Error(args ...interface{}) {
+	fileLog.Error(args...)
+	consoleLog.Error(args...)
+}
+func Fatal(args ...interface{}) {
+	fileLog.Fatal(args...)
+	consoleLog.Fatal(args...)
+}
+func Infof(format string, args ...interface{}) {
+	fileLog.Infof(format, args...)
+	consoleLog.Infof(format, args...)
+}
+func Errorf(format string, args ...interface{}) {
+	fileLog.Errorf(format, args...)
+	consoleLog.Errorf(format, args...)
+}
+func Fatalf(format string, args ...interface{}) {
+	fileLog.Fatalf(format, args...)
+	consoleLog.Fatalf(format, args...)
+}
+
+func InitLog(path string) (string, *os.File, error) {
+	filePath := path
+	logPath := []string{}
+	tempPath := strings.Split(path, "/")
+	for _, subPath := range tempPath {
+		if subPath != "" {
+			logPath = append(logPath, subPath)
+		}
+	}
+
+	if len(logPath) == 0 {
+		if path != "/" {
+			logPath = []string{"."}
+		}
+	}
+
+	if len(logPath) > 0 && strings.Contains(logPath[len(logPath)-1], ".log") {
+		filePath = logPath[len(logPath)-1]
+		logPath = logPath[:len(logPath)-1]
+	} else {
+		filePath = "mitmproxy.log"
+	}
+
+	filePath = strings.Join(logPath, "/") + "/" + filePath
+
+	err := os.MkdirAll(strings.Join(logPath, "/"), 0666)
+	if err != nil {
+		return filePath, nil, err
+	}
+
+	file, err := os.OpenFile(filePath, os.O_CREATE|os.O_RDWR|os.O_APPEND, 0666)
+	return filePath, file, err
+}
+
 func (a *SetProxyStrategy) Request(f *proxy.Flow) {
 	method := f.Request.Method
 	newUrl := url.URL{
@@ -96,6 +159,9 @@ func (a *SetProxyStrategy) Request(f *proxy.Flow) {
 		Path:     f.Request.URL.Path,
 		RawQuery: f.Request.URL.RawQuery,
 	}
+
+	Info("[request] proxy start: ", newUrl)
+
 	for _, p := range a.ProxyStrategys {
 		if p.Type != "request" {
 			continue
@@ -104,7 +170,8 @@ func (a *SetProxyStrategy) Request(f *proxy.Flow) {
 		if matched, err := regexp.Match(p.Regex, []byte(url)); !matched || err != nil {
 			continue
 		} else {
-			fmt.Println("*******match********", p)
+			pJson, _ := json.Marshal(p)
+			Info("[request] proxy match rule: ", string(pJson))
 			if p.Method != "" {
 				method = strings.ToUpper(p.Method)
 			}
@@ -122,8 +189,8 @@ func (a *SetProxyStrategy) Request(f *proxy.Flow) {
 			if p.Scheme != "" {
 				newUrl.Scheme = p.Scheme
 			}
-			fmt.Println("## newUrl ##")
-			fmt.Println(newUrl.String())
+			urlJson, _ := json.Marshal(newUrl)
+			Info("[request] proxy new url: ", newUrl.String(), ", url info: ", string(urlJson))
 			break
 		}
 	}
@@ -143,13 +210,13 @@ func (a *SetProxyStrategy) Response(f *proxy.Flow) {
 		if p.Type != "response" {
 			continue
 		}
-		fmt.Println(f.Response.Header.Get("Content-Type"))
 		if matched, err := regexp.Match(p.Regex, []byte(f.Response.Header.Get("Content-Type"))); !matched || err != nil {
 			continue
 		} else if strings.EqualFold(p.ContentType, f.Response.Header.Get("Content-Type")) {
 			continue
 		} else {
-			fmt.Println("*******match********", p)
+			pJson, _ := json.Marshal(p)
+			Info("[response] proxy match: ", string(pJson))
 			if p.Method != "" {
 				method = strings.ToUpper(p.Method)
 			}
@@ -167,12 +234,12 @@ func (a *SetProxyStrategy) Response(f *proxy.Flow) {
 			if p.Scheme != "" {
 				newUrl.Scheme = p.Scheme
 			}
-			fmt.Println("## newUrl ##")
-			fmt.Println(newUrl.String())
+			urlJson, _ := json.Marshal(newUrl)
+			Info("[response] proxy new url: ", newUrl.String(), ", url info: ", string(urlJson))
 
 			proxyReq, err := http.NewRequest(method, newUrl.String(), bytes.NewReader(f.Request.Body))
 			if err != nil {
-				log.Errorf("get request error: ", err)
+				Errorf("get request error: ", err)
 			}
 			response, err := (&http.Client{}).Do(proxyReq)
 			if err != nil {
@@ -180,66 +247,83 @@ func (a *SetProxyStrategy) Response(f *proxy.Flow) {
 			}
 			defer response.Body.Close()
 			if err != nil || response.StatusCode != http.StatusOK {
-				log.Errorf("parse response error: ", err)
+				Errorf("parse response error: ", err)
 			}
-			body, err := ioutil.ReadAll(response.Body)
+			body, err := io.ReadAll(response.Body)
 			if err != nil {
-				log.Errorf("parse body error: ", err)
+				Errorf("parse body error: ", err)
 			}
 
 			if response.Header.Get("Content-Type") == f.Response.Header.Get("Content-Type") {
 				f.Response.Body = body
 				f.Response.Header.Set("Content-Length", strconv.Itoa(len(f.Response.Body)))
+				Info("[response] same content-type, update response body")
 			} else {
-				log.Infof("content differ from origin, origin: %s, but get: %s", f.Response.Header.Get("Content-Type"), response.Header.Get("Content-Type"))
+				Infof("[response] content differ from origin, origin: %s, but get: %s", f.Response.Header.Get("Content-Type"), response.Header.Get("Content-Type"))
 			}
 
 			break
 		}
 
 	}
-
 }
 
 func main() {
+	// load config
 	config.loadConfig()
 
-	if config.debug > 0 {
-		rawLog.SetFlags(rawLog.LstdFlags | rawLog.Lshortfile)
-		log.SetLevel(log.DebugLevel)
+	// init log
+	fileLog = log.New()
+	consoleLog = log.New()
+	log.SetFormatter(&log.TextFormatter{
+		FullTimestamp:   true,
+		TimestampFormat: "2006-01-02 15:04:05", // 设置json里的日期输出格式
+	})
+	fileLog.SetFormatter(&log.TextFormatter{
+		FullTimestamp:   true,
+		TimestampFormat: "2006-01-02 15:04:05", // 设置json里的日期输出格式
+	})
+	consoleLog.SetFormatter(&log.TextFormatter{
+		FullTimestamp:   true,
+		TimestampFormat: "2006-01-02 15:04:05", // 设置json里的日期输出格式
+		ForceColors:     true,
+	})
+	// InitLog("/")
+	// InitLog("./")
+	// InitLog("/test.log")
+	// InitLog("./log")
+	// InitLog("log")
+	path, file, err := InitLog(config.logPath)
+	if err != nil {
+		Fatal("fail to init log, ", err)
 	} else {
-		log.SetLevel(log.InfoLevel)
+		Info("init log path succeed, path:", path)
 	}
-	if config.debug == 2 {
-		log.SetReportCaller(true)
-	}
-	log.SetOutput(os.Stdout)
-	log.SetFormatter(&log.TextFormatter{
-		FullTimestamp: true,
-	})
+	log.SetOutput(file)
+	fileLog.SetOutput(file)
+	consoleLog.SetOutput(os.Stdout)
 
-	log.SetOutput(os.Stdout)
-	log.SetFormatter(&log.TextFormatter{
-		FullTimestamp: true,
-	})
-
+	// init proxy config
 	opts := &proxy.Options{
 		Addr:              config.addr,
 		StreamLargeBodies: 1024 * 1024 * 5,
 		SslInsecure:       config.ssl_insecure,
 		CaRootPath:        config.certPath,
 	}
+	fmt.Println("web interface start listen at : " + config.webAddr)
+	fmt.Println("Proxy start listen at :" + config.addr)
 
 	p, err := proxy.NewProxy(opts)
 	if err != nil {
-		log.Fatal(err)
+		Fatal(err)
 	}
 
 	if config.version {
-		fmt.Println("go-mitmproxy: " + p.Version)
+		fmt.Println("go-mitmproxy version: " + p.Version)
 		os.Exit(0)
 	}
 
+	// add addon
 	p.AddAddon(&proxy.LogAddon{})
 
 	setProxyStrategyAddon := SetProxyStrategy{}

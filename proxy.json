@@ -20,4 +20,11 @@
     "path":"test",
     "method":"get",
     "scheme":"http"   
+},{
+    "type": "request",
+    "regex":"baidu",    
+    "host":"localhost:8080",
+    "path":"test",
+    "method":"get",
+    "scheme":"http"   
 }]

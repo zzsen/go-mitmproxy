@@ -1,0 +1,51 @@
+settings:
+  legacy:
+    force: true
+    interval: 100ms
+server:
+  status: false
+  open: false
+  host: localhost
+  port: 4321
+schema:
+  - name: go-mitmproxy
+    path: .
+    commands:
+      clean:
+        status: false
+      vet:
+        status: false
+      fmt:
+        status: false
+      test:
+        status: false
+      generate:
+        status: false
+      install:
+        status: true
+      build:
+        status: false
+        args:
+          - -o proxy.exe
+      run:
+        status: true
+    args:
+      - --addr
+      - ":9998"
+      - --proxy_config_path
+      - proxy.json
+    watcher:
+      paths:
+        - /
+      extensions:
+        - go
+        - yml
+        - html
+        - json
+      ignored_paths:
+        - vendor
+        - log
+      scripts:
+        - type: before
+          command: tskill go-mitmproxy # the same with path
+          output: false
