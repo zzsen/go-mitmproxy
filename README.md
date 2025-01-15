@@ -59,5 +59,5 @@ type ProxyStrategy struct {
 ### 更多
 
 fork from [lqqyt2423/go-mitmproxy](https://github.com/lqqyt2423/go-mitmproxy)<br/>
-原 readme: [README.md](https://github.com/lqqyt2423/go-mitmproxy/blob/main/README.md)<br/>
-原 readme(英文版): [README_EN.md](https://github.com/lqqyt2423/go-mitmproxy/blob/main/README_EN.md)
+原 readme: [README.md](https://github.com/lqqyt2423/go-mitmproxy/blob/main/README_CN.md)<br/>
+原 readme(英文版): [README_EN.md](https://github.com/lqqyt2423/go-mitmproxy/blob/main/README.md)

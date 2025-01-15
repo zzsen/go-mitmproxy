@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"io"
+	"net/http"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -40,28 +41,26 @@ type Addon interface {
 
 	// Stream response body modifier
 	StreamResponseModifier(*Flow, io.Reader) io.Reader
+
+	// onAccessProxyServer
+	AccessProxyServer(req *http.Request, res http.ResponseWriter)
 }
 
 // BaseAddon do nothing
 type BaseAddon struct{}
 
-func (addon *BaseAddon) ClientConnected(*ClientConn)     {}
-func (addon *BaseAddon) ClientDisconnected(*ClientConn)  {}
-func (addon *BaseAddon) ServerConnected(*ConnContext)    {}
-func (addon *BaseAddon) ServerDisconnected(*ConnContext) {}
-
-func (addon *BaseAddon) TlsEstablishedServer(*ConnContext) {}
-
-func (addon *BaseAddon) Requestheaders(*Flow)  {}
-func (addon *BaseAddon) Request(*Flow)         {}
-func (addon *BaseAddon) Responseheaders(*Flow) {}
-func (addon *BaseAddon) Response(*Flow)        {}
-func (addon *BaseAddon) StreamRequestModifier(f *Flow, in io.Reader) io.Reader {
-	return in
-}
-func (addon *BaseAddon) StreamResponseModifier(f *Flow, in io.Reader) io.Reader {
-	return in
-}
+func (addon *BaseAddon) ClientConnected(*ClientConn)                                  {}
+func (addon *BaseAddon) ClientDisconnected(*ClientConn)                               {}
+func (addon *BaseAddon) ServerConnected(*ConnContext)                                 {}
+func (addon *BaseAddon) ServerDisconnected(*ConnContext)                              {}
+func (addon *BaseAddon) TlsEstablishedServer(*ConnContext)                            {}
+func (addon *BaseAddon) Requestheaders(*Flow)                                         {}
+func (addon *BaseAddon) Request(*Flow)                                                {}
+func (addon *BaseAddon) Responseheaders(*Flow)                                        {}
+func (addon *BaseAddon) Response(*Flow)                                               {}
+func (addon *BaseAddon) StreamRequestModifier(f *Flow, in io.Reader) io.Reader        { return in }
+func (addon *BaseAddon) StreamResponseModifier(f *Flow, in io.Reader) io.Reader       { return in }
+func (addon *BaseAddon) AccessProxyServer(req *http.Request, res http.ResponseWriter) {}
 
 // LogAddon log connection and flow
 type LogAddon struct {
@@ -81,10 +80,11 @@ func (addon *LogAddon) ServerConnected(connCtx *ConnContext) {
 }
 
 func (addon *LogAddon) ServerDisconnected(connCtx *ConnContext) {
-	log.Infof("%v server disconnect %v (%v->%v)\n", connCtx.ClientConn.Conn.RemoteAddr(), connCtx.ServerConn.Address, connCtx.ServerConn.Conn.LocalAddr(), connCtx.ServerConn.Conn.RemoteAddr())
+	log.Infof("%v server disconnect %v (%v->%v) - %v\n", connCtx.ClientConn.Conn.RemoteAddr(), connCtx.ServerConn.Address, connCtx.ServerConn.Conn.LocalAddr(), connCtx.ServerConn.Conn.RemoteAddr(), connCtx.FlowCount.Load())
 }
 
 func (addon *LogAddon) Requestheaders(f *Flow) {
+	log.Debugf("%v Requestheaders %v %v\n", f.ConnContext.ClientConn.Conn.RemoteAddr(), f.Request.Method, f.Request.URL.String())
 	start := time.Now()
 	go func() {
 		<-f.Done()
@@ -98,4 +98,17 @@ func (addon *LogAddon) Requestheaders(f *Flow) {
 		}
 		log.Infof("%v %v %v %v %v - %v ms\n", f.ConnContext.ClientConn.Conn.RemoteAddr(), f.Request.Method, f.Request.URL.String(), StatusCode, contentLen, time.Since(start).Milliseconds())
 	}()
+}
+
+type UpstreamCertAddon struct {
+	BaseAddon
+	UpstreamCert bool // Connect to upstream server to look up certificate details.
+}
+
+func NewUpstreamCertAddon(upstreamCert bool) *UpstreamCertAddon {
+	return &UpstreamCertAddon{UpstreamCert: upstreamCert}
+}
+
+func (addon *UpstreamCertAddon) ClientConnected(conn *ClientConn) {
+	conn.UpstreamCert = addon.UpstreamCert
 }

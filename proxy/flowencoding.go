@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"github.com/andybalholm/brotli"
+	"github.com/klauspost/compress/zstd"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -35,44 +36,27 @@ func (r *Response) IsTextContentType() bool {
 }
 
 func (r *Response) DecodedBody() ([]byte, error) {
-	if r.decodedBody != nil {
-		return r.decodedBody, nil
-	}
-
-	if r.decodedErr != nil {
-		return nil, r.decodedErr
-	}
-
-	if r.Body == nil {
-		return nil, nil
-	}
-
 	if len(r.Body) == 0 {
-		r.decodedBody = r.Body
-		return r.decodedBody, nil
+		return r.Body, nil
 	}
 
 	enc := r.Header.Get("Content-Encoding")
 	if enc == "" || enc == "identity" {
-		r.decodedBody = r.Body
-		return r.decodedBody, nil
+		return r.Body, nil
 	}
 
 	decodedBody, decodedErr := decode(enc, r.Body)
 	if decodedErr != nil {
-		r.decodedErr = decodedErr
-		log.Error(r.decodedErr)
+		log.Error(decodedErr)
 		return nil, decodedErr
 	}
 
-	r.decodedBody = decodedBody
-	r.decoded = true
-	return r.decodedBody, nil
+	return decodedBody, nil
 }
 
 func (r *Response) ReplaceToDecodedBody() {
 	body, err := r.DecodedBody()
-	if err != nil || body == nil {
+	if err != nil {
 		return
 	}
 
@@ -110,6 +94,17 @@ func decode(enc string, body []byte) ([]byte, error) {
 		dreader := flate.NewReader(bytes.NewReader(body))
 		buf := bytes.NewBuffer(make([]byte, 0))
 		_, err := io.Copy(buf, dreader)
+		if err != nil {
+			return nil, err
+		}
+		return buf.Bytes(), nil
+	} else if enc == "zstd" {
+		dreader, err := zstd.NewReader(bytes.NewReader(body))
+		if err != nil {
+			return nil, err
+		}
+		buf := bytes.NewBuffer(make([]byte, 0))
+		_, err = io.Copy(buf, dreader)
 		if err != nil {
 			return nil, err
 		}

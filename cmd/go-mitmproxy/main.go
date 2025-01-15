@@ -1,59 +1,48 @@
 package main
 
 import (
-	"flag"
 	"fmt"
 	rawLog "log"
+	"net/http"
 	"os"
 
 	"github.com/lqqyt2423/go-mitmproxy/addon"
+	"github.com/lqqyt2423/go-mitmproxy/internal/helper"
 	"github.com/lqqyt2423/go-mitmproxy/proxy"
 	"github.com/lqqyt2423/go-mitmproxy/web"
 	log "github.com/sirupsen/logrus"
 )
 
 type Config struct {
-	debug    int
-	version  bool
-	certPath string
+	version bool // show go-mitmproxy version
 
-	addr         string
-	webAddr      string
-	ssl_insecure bool
+	Addr         string   // proxy listen addr
+	WebAddr      string   // web interface listen addr
+	SslInsecure  bool     // not verify upstream server SSL/TLS certificates.
+	IgnoreHosts  []string // a list of ignore hosts
+	AllowHosts   []string // a list of allow hosts
+	CertPath     string   // path of generate cert files
+	Debug        int      // debug mode: 1 - print debug log, 2 - show debug from
+	Dump         string   // dump filename
+	DumpLevel    int      // dump level: 0 - header, 1 - header + body
+	Upstream     string   // upstream proxy
+	UpstreamCert bool     // Connect to upstream server to look up certificate details. Default: True
+	MapRemote    string   // map remote config filename
+	MapLocal     string   // map local config filename
 
-	dump      string // dump filename
-	dumpLevel int    // dump level
-
-	mapperDir string
-}
-
-func loadConfig() *Config {
-	config := new(Config)
-
-	flag.IntVar(&config.debug, "debug", 0, "debug mode: 1 - print debug log, 2 - show debug from")
-	flag.BoolVar(&config.version, "version", false, "show version")
-	flag.StringVar(&config.addr, "addr", ":9080", "proxy listen addr")
-	flag.StringVar(&config.webAddr, "web_addr", ":9081", "web interface listen addr")
-	flag.BoolVar(&config.ssl_insecure, "ssl_insecure", false, "not verify upstream server SSL/TLS certificates.")
-	flag.StringVar(&config.dump, "dump", "", "dump filename")
-	flag.IntVar(&config.dumpLevel, "dump_level", 0, "dump level: 0 - header, 1 - header + body")
-	flag.StringVar(&config.mapperDir, "mapper_dir", "", "mapper files dirpath")
-	flag.StringVar(&config.certPath, "cert_path", "", "path of generate cert files")
-	flag.Parse()
-
-	return config
+	filename string // read config from the filename
 }
 
 func main() {
 	config := loadConfig()
 
-	if config.debug > 0 {
+	if config.Debug > 0 {
 		rawLog.SetFlags(rawLog.LstdFlags | rawLog.Lshortfile)
 		log.SetLevel(log.DebugLevel)
 	} else {
 		log.SetLevel(log.InfoLevel)
 	}
-	if config.debug == 2 {
+	if config.Debug == 2 {
 		log.SetReportCaller(true)
 	}
 	log.SetOutput(os.Stdout)
@@ -62,11 +51,12 @@ func main() {
 	})
 
 	opts := &proxy.Options{
-		Debug:             config.debug,
-		Addr:              config.addr,
+		Debug:             config.Debug,
+		Addr:              config.Addr,
 		StreamLargeBodies: 1024 * 1024 * 5,
-		SslInsecure:       config.ssl_insecure,
-		CaRootPath:        config.certPath,
+		SslInsecure:       config.SslInsecure,
+		CaRootPath:        config.CertPath,
+		Upstream:          config.Upstream,
 	}
 
 	p, err := proxy.NewProxy(opts)
@@ -81,17 +71,46 @@ func main() {
 
 	log.Infof("go-mitmproxy version %v\n", p.Version)
 
-	p.AddAddon(&proxy.LogAddon{})
-	p.AddAddon(web.NewWebAddon(config.webAddr))
-
-	if config.dump != "" {
-		dumper := addon.NewDumperWithFilename(config.dump, config.dumpLevel)
-		p.AddAddon(dumper)
+	if len(config.IgnoreHosts) > 0 {
+		p.SetShouldInterceptRule(func(req *http.Request) bool {
+			return !helper.MatchHost(req.Host, config.IgnoreHosts)
+		})
+	}
+	if len(config.AllowHosts) > 0 {
+		p.SetShouldInterceptRule(func(req *http.Request) bool {
+			return helper.MatchHost(req.Host, config.AllowHosts)
+		})
 	}
 
-	if config.mapperDir != "" {
-		mapper := addon.NewMapper(config.mapperDir)
-		p.AddAddon(mapper)
+	if !config.UpstreamCert {
+		p.AddAddon(proxy.NewUpstreamCertAddon(false))
+		log.Infoln("UpstreamCert config false")
+	}
+
+	p.AddAddon(&proxy.LogAddon{})
+	p.AddAddon(web.NewWebAddon(config.WebAddr))
+
+	if config.MapRemote != "" {
+		mapRemote, err := addon.NewMapRemoteFromFile(config.MapRemote)
+		if err != nil {
+			log.Warnf("load map remote error: %v", err)
+		} else {
+			p.AddAddon(mapRemote)
+		}
+	}
+
+	if config.MapLocal != "" {
+		mapLocal, err := addon.NewMapLocalFromFile(config.MapLocal)
+		if err != nil {
+			log.Warnf("load map local error: %v", err)
+		} else {
+			p.AddAddon(mapLocal)
+		}
+	}
+
+	if config.Dump != "" {
+		dumper := addon.NewDumperWithFilename(config.Dump, config.DumpLevel)
+		p.AddAddon(dumper)
 	}
 
 	log.Fatal(p.Start())

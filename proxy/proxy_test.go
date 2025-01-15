@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/tls"
 	"io"
-	"io/ioutil"
 	"net"
 	"net/http"
 	"net/url"
@@ -34,7 +33,7 @@ func testSendRequest(t *testing.T, endpoint string, client *http.Client, bodyWan
 	resp, err := client.Do(req)
 	handleError(t, err)
 	defer resp.Body.Close()
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	handleError(t, err)
 	if string(body) != bodyWant {
 		t.Fatalf("expected %s, but got %s", bodyWant, body)
@@ -73,13 +72,14 @@ func (helper *testProxyHelper) init(t *testing.T) {
 	tlsPlainLn, err := net.Listen("tcp", "127.0.0.1:0")
 	handleError(t, err)
 	helper.tlsPlainLn = tlsPlainLn
-	ca, err := cert.NewCAMemory()
+	ca, err := cert.NewSelfSignCAMemory()
 	handleError(t, err)
 	cert, err := ca.GetCert("localhost")
 	handleError(t, err)
 	tlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{*cert},
 	}
+	helper.server.TLSConfig = tlsConfig
 	helper.tlsLn = tls.NewListener(tlsPlainLn, tlsConfig)
 
 	httpEndpoint := "http://" + ln.Addr().String() + "/"
@@ -621,7 +621,7 @@ func TestProxyShutdown(t *testing.T) {
 	testSendRequest(t, httpEndpoint, proxyClient, "ok")
 	testSendRequest(t, httpsEndpoint, proxyClient, "ok")
 
-	if err := testProxy.Shutdown(context.TODO()); err != nil {
+	if err := testProxy.Shutdown(context.Background()); err != nil {
 		t.Fatalf("shutdown got error %v", err)
 	}
 
@@ -633,4 +633,82 @@ func TestProxyShutdown(t *testing.T) {
 	case <-time.After(time.Millisecond * 10):
 		t.Fatal("shutdown timeout")
 	}
+}
+
+func TestOnUpstreamCert(t *testing.T) {
+	helper := &testProxyHelper{
+		server:    &http.Server{},
+		proxyAddr: ":29085",
+	}
+	helper.init(t)
+	httpEndpoint := helper.httpEndpoint
+	httpsEndpoint := helper.httpsEndpoint
+	testOrderAddonInstance := helper.testOrderAddonInstance
+	testProxy := helper.testProxy
+	getProxyClient := helper.getProxyClient
+	defer helper.ln.Close()
+	go helper.server.Serve(helper.ln)
+	defer helper.tlsPlainLn.Close()
+	go helper.server.Serve(helper.tlsLn)
+	go testProxy.Start()
+	time.Sleep(time.Millisecond * 10) // wait for test proxy startup
+
+	proxyClient := getProxyClient()
+
+	t.Run("http", func(t *testing.T) {
+		time.Sleep(time.Millisecond * 10)
+		testOrderAddonInstance.reset()
+		testSendRequest(t, httpEndpoint, proxyClient, "ok")
+		time.Sleep(time.Millisecond * 10)
+		testOrderAddonInstance.before(t, "Requestheaders", "ServerConnected")
+	})
+
+	t.Run("https", func(t *testing.T) {
+		time.Sleep(time.Millisecond * 10)
+		testOrderAddonInstance.reset()
+		testSendRequest(t, httpsEndpoint, proxyClient, "ok")
+		time.Sleep(time.Millisecond * 10)
+		testOrderAddonInstance.before(t, "ServerConnected", "Requestheaders")
+		testOrderAddonInstance.contains(t, "TlsEstablishedServer")
+	})
+
+}
+
+func TestOffUpstreamCert(t *testing.T) {
+	helper := &testProxyHelper{
+		server:    &http.Server{},
+		proxyAddr: ":29086",
+	}
+	helper.init(t)
+	httpEndpoint := helper.httpEndpoint
+	httpsEndpoint := helper.httpsEndpoint
+	testOrderAddonInstance := helper.testOrderAddonInstance
+	testProxy := helper.testProxy
+	testProxy.AddAddon(NewUpstreamCertAddon(false))
+	getProxyClient := helper.getProxyClient
+	defer helper.ln.Close()
+	go helper.server.Serve(helper.ln)
+	defer helper.tlsPlainLn.Close()
+	go helper.server.Serve(helper.tlsLn)
+	go testProxy.Start()
+	time.Sleep(time.Millisecond * 10) // wait for test proxy startup
+
+	proxyClient := getProxyClient()
+
+	t.Run("http", func(t *testing.T) {
+		time.Sleep(time.Millisecond * 10)
+		testOrderAddonInstance.reset()
+		testSendRequest(t, httpEndpoint, proxyClient, "ok")
+		time.Sleep(time.Millisecond * 10)
+		testOrderAddonInstance.before(t, "Requestheaders", "ServerConnected")
+	})
+
+	t.Run("https", func(t *testing.T) {
+		time.Sleep(time.Millisecond * 10)
+		testOrderAddonInstance.reset()
+		testSendRequest(t, httpsEndpoint, proxyClient, "ok")
+		time.Sleep(time.Millisecond * 10)
+		testOrderAddonInstance.before(t, "Requestheaders", "ServerConnected")
+		testOrderAddonInstance.contains(t, "TlsEstablishedServer")
+	})
 }

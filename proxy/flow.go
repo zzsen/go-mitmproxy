@@ -100,10 +100,6 @@ type Response struct {
 	BodyReader io.Reader
 
 	close bool // connection close
-
-	decodedBody []byte
-	decoded     bool // decoded reports whether the response was sent compressed but was decoded to decodedBody.
-	decodedErr  error
 }
 
 // flow
@@ -115,9 +111,9 @@ type Flow struct {
 
 	// https://docs.mitmproxy.org/stable/overview-features/#streaming
 	// 如果为 true，则不缓冲 Request.Body 和 Response.Body，且不进入之后的 Addon.Request 和 Addon.Response
-	Stream bool
-
-	done chan struct{}
+	Stream            bool
+	UseSeparateClient bool // use separate http client to send http request
+	done              chan struct{}
 }
 
 func newFlow() *Flow {
